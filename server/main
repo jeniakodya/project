@@ -1,0 +1,174 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import nltk
+import ssl
+
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+try:
+    nltk.download('punkt', quiet=True)
+    nltk.download('averaged_perceptron_tagger', quiet=True)
+    nltk.download('maxent_ne_chunker', quiet=True)
+    nltk.download('words', quiet=True)
+    nltk.download('wordnet', quiet=True)
+    print("✅ NLTK данные успешно загружены")
+except Exception as e:
+    print(f"⚠️ Предупреждение при загрузке NLTK: {e}")
+
+import uvicorn
+import numpy as np
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+
+from models import TFIDFModel, BOWModel, LSAModel
+from preprocessing import NLTKProcessor
+
+app = FastAPI(title="NLP Микросервис", version="1.0.0")
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+import uvicorn
+import numpy as np
+
+# Импортируем наши модели и функции
+from models import TFIDFModel, BOWModel, LSAModel
+from preprocessing import NLTKProcessor
+
+app = FastAPI(title="NLP Микросервис", version="1.0.0")
+
+# Инициализация обработчиков
+tfidf_model = TFIDFModel()
+bow_model = BOWModel()
+lsa_model = LSAModel()
+nltk_processor = NLTKProcessor()
+
+# Модели запросов
+class TextsRequest(BaseModel):
+    texts: List[str]
+    max_features: Optional[int] = 100
+    n_components: Optional[int] = 5
+
+class TextRequest(BaseModel):
+    text: str
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "NLP Микросервис",
+        "endpoints": {
+            "tf_idf": "POST /tf-idf",
+            "bag_of_words": "POST /bag-of-words", 
+            "lsa": "POST /lsa",
+            "word2vec": "POST /word2vec",
+            "nltk_tokenize": "POST /text_nltk/tokenize",
+            "nltk_stem": "POST /text_nltk/stem",
+            "nltk_lemmatize": "POST /text_nltk/lemmatize",
+            "nltk_pos": "POST /text_nltk/pos_tag",
+            "nltk_ner": "POST /text_nltk/ner"
+        }
+    }
+
+@app.post("/tf-idf")
+def calculate_tfidf(request: TextsRequest):
+    """TF-IDF на numpy"""
+    try:
+        matrix, vocab = tfidf_model.fit_transform(request.texts, request.max_features)
+        return {
+            "success": True,
+            "matrix": matrix.tolist(),
+            "vocabulary": vocab,
+            "shape": matrix.shape
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/bag-of-words")
+def calculate_bow(request: TextsRequest):
+    """Bag of Words на numpy"""
+    try:
+        matrix, vocab = bow_model.fit_transform(request.texts, request.max_features)
+        return {
+            "success": True,
+            "matrix": matrix.tolist(),
+            "vocabulary": vocab,
+            "shape": matrix.shape
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/lsa")
+def calculate_lsa(request: TextsRequest):
+    """LSA из sklearn"""
+    try:
+        result = lsa_model.fit_transform(
+            request.texts, 
+            request.max_features, 
+            request.n_components
+        )
+        return {
+            "success": True,
+            "components": result["components"].tolist(),
+            "transformed": result["transformed"].tolist(),
+            "variance": result["variance"].tolist()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/word2vec")
+def calculate_word2vec(request: TextsRequest):
+    """Word2Vec (упрощенный через sklearn)"""
+    try:
+        from sklearn.feature_extraction.text import CountVectorizer
+        from sklearn.decomposition import TruncatedSVD
+        
+        vectorizer = CountVectorizer(max_features=request.max_features)
+        X = vectorizer.fit_transform(request.texts)
+        
+        svd = TruncatedSVD(n_components=request.n_components)
+        embeddings = svd.fit_transform(X)
+        
+        return {
+            "success": True,
+            "embeddings": embeddings.tolist(),
+            "vocabulary": vectorizer.get_feature_names_out().tolist()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# NLTK эндпоинты
+@app.post("/text_nltk/tokenize")
+def tokenize_text(request: TextRequest):
+    tokens = nltk_processor.tokenize(request.text)
+    return {"text": request.text, "tokens": tokens}
+
+@app.post("/text_nltk/stem")
+def stem_text(request: TextRequest):
+    stems = nltk_processor.stem(request.text)
+    return {"text": request.text, "stems": stems}
+
+@app.post("/text_nltk/lemmatize")
+def lemmatize_text(request: TextRequest):
+    lemmas = nltk_processor.lemmatize(request.text)
+    return {"text": request.text, "lemmas": lemmas}
+
+@app.post("/text_nltk/pos_tag")
+def pos_tag_text(request: TextRequest):
+    pos_tags = nltk_processor.pos_tag(request.text)
+    return {"text": request.text, "pos_tags": pos_tags}
+
+@app.post("/text_nltk/ner")
+def ner_text(request: TextRequest):
+    entities = nltk_processor.ner(request.text)
+    return {"text": request.text, "entities": entities}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
